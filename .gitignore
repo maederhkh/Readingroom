@@ -1,0 +1,22 @@
+# Environment
+.venv/
+.python-version
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# The source PDFs - large binaries, and you already have them.
+# Tests that need them skip themselves when they are absent.
+documents/
+
+# The shelf is rebuilt from documents/ by `python -m readingroom ingest`
+shelf/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
