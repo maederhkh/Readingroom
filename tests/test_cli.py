@@ -1,23 +1,8 @@
-"""The two commands: `ingest` builds the shelf, `inspect` shows what is on it."""
-import pymupdf
-import pytest
+"""The commands: `ingest` builds the shelf, `inspect` shows it, `search` searches it.
 
+The `documents` fixture (a one-page PDF) lives in conftest.py.
+"""
 from readingroom.__main__ import main
-
-
-@pytest.fixture
-def documents(tmp_path):
-    """A one-page PDF: a header in the top strip, and one line of body text."""
-    folder = tmp_path / "documents"
-    folder.mkdir()
-    pdf = pymupdf.open()
-    page = pdf.new_page(width=595, height=842)          # A4, in points
-    page.insert_text((40, 50), "L 1/1  Official Journal of the European Union", fontsize=9.6)
-    page.insert_text((70, 200), "Article 1", fontsize=9.6)
-    page.insert_text((70, 215), "Subject-matter and objectives", fontsize=9.6)
-    pdf.save(folder / "Tiny Law.pdf")
-    pdf.close()
-    return folder
 
 
 def test_ingest_puts_each_pdf_on_the_shelf(documents, tmp_path):

@@ -62,4 +62,46 @@ python -m readingroom search "keeping records correct" --law gdpr
 | Splitting long articles into smaller pieces | only if long articles cause problems |
 | Telling Claude Code to rely only on the documents | skills, step 5 |
 
-**Status: half 1 complete (29 Sep 2026).** 86 tests, all passing.
+## Half 2 — connecting it to Claude Code
+
+`src/readingroom/mcp_server.py` is a small helper program. Claude Code starts it
+itself, because `.mcp.json` in the project folder says so, and talks to it through its
+standard input and output. It loads the shelf and builds the search index once, then
+answers `keyword_search` calls.
+
+What Claude Code sees:
+
+- the tool's **name**, `keyword_search`
+- its **description** — what it searches, how it ranks, what it cannot do (words not
+  meaning; articles only), how to write a phrase, and what a result contains
+- an **explanation of each input** — `query`, `law` (lists the laws on the shelf), `limit`
+
+What it gets back: structured results (bookmark, law, article, title, pages, verbatim
+passage, score), or an empty list with a note suggesting what to try instead.
+
+## What we learned while building half 2
+
+- **The MCP library changed under us.** Version 2 renamed `FastMCP` to `MCPServer`
+  and renamed fields (`isError` → `is_error`). Checking the installed library instead
+  of writing from memory caught it before any code was written against the old names.
+- **An ordinary error's message is hidden from the agent.** A refusal like "No law
+  called 'ai-act' — laws available: …" reached Claude Code only as "Error executing
+  tool keyword_search": it would know it failed, but not how to fix the call. The
+  library's `ToolError` is the way to say "expected failure, pass my message on".
+- **Test what the agent sees, over the real connection.** Called directly in Python,
+  the same refusal is thrown as an exception; over the connection it arrives as an
+  error result the agent can read. The tests start the helper program as its own
+  process and talk to it exactly as Claude Code does.
+- **A project cannot start programs on your computer without your approval.** Claude
+  Code lists the server as "pending approval" until you allow it once.
+
+## Try it in Claude Code
+
+1. Start a **new** Claude Code session in the `readingroom` folder.
+2. Approve the `readingroom` MCP server when asked.
+3. Ask, for example: *"Using the readingroom keyword_search tool, what does the GDPR
+   say about automated decision-making?"*
+
+Watch which searches it runs, whether it searches again, and what it cites.
+
+**Status: step 2 complete (29 Sep 2026).** 97 tests, all passing.
