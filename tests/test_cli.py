@@ -2,6 +2,8 @@
 
 The `documents` fixture (a one-page PDF) lives in conftest.py.
 """
+import pytest
+
 from readingroom.__main__ import main
 
 
@@ -77,6 +79,54 @@ def test_search_with_no_match_says_so(documents, tmp_path, capsys):
     capsys.readouterr()
     assert main(["search", "zebra", "--shelf", str(shelf)]) == 0
     assert "No articles contain these words." in capsys.readouterr().out
+
+
+@pytest.fixture
+def fake_model(monkeypatch):
+    """Put a scripted model in place of OpenRouter, so `ask` never reaches the network."""
+    from tests.test_agent import FakeModel
+    import readingroom.__main__ as cli
+
+    def install(*replies):
+        model = FakeModel(*replies)
+        monkeypatch.setattr(cli, "OpenRouterModel", lambda name=None: model)
+        monkeypatch.setattr(cli, "_load_env", lambda: None)
+        return model
+    return install
+
+
+def test_ask_shows_each_search_then_the_answer_then_the_cost(documents, tmp_path, capsys, fake_model):
+    from tests.test_agent import answers, asks_to_search
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    fake_model(asks_to_search("objectives"), answers("Article 1 sets out the objectives [tiny-law/article-1, p. 1]."))
+    capsys.readouterr()
+    assert main(["ask", "What are the objectives?", "--shelf", str(shelf)]) == 0
+    out = capsys.readouterr().out
+    assert "search: objectives" in out and "tiny-law/article-1" in out
+    assert "Article 1 sets out the objectives" in out
+    assert "1 search · 2 rounds · 360 tokens" in out
+
+
+def test_ask_warns_when_the_answer_was_cut_off(documents, tmp_path, capsys, fake_model):
+    from tests.test_agent import answers
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    fake_model(answers("Article 1 says", cut_off=True))
+    capsys.readouterr()
+    main(["ask", "q", "--shelf", str(shelf)])
+    assert "cut off" in capsys.readouterr().out
+
+
+def test_ask_without_a_key_says_where_to_put_it(documents, tmp_path, capsys, monkeypatch):
+    import readingroom.__main__ as cli
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    monkeypatch.setattr(cli, "_load_env", lambda: None)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    capsys.readouterr()
+    assert main(["ask", "q", "--shelf", str(shelf)]) == 1
+    assert ".env" in capsys.readouterr().err
 
 
 def test_inspect_an_unknown_document_says_what_is_on_the_shelf(documents, tmp_path, capsys):

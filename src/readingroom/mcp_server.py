@@ -63,7 +63,9 @@ def keyword_search_result(index: KeywordIndex, laws: list[str], query: str,
 def build_server(shelf_dir: pathlib.Path) -> MCPServer:
     laws = shelf.list_documents(shelf_dir)
     index = KeywordIndex(load_passages(shelf_dir))  # built once, at startup
-    server = MCPServer(name="readingroom")
+    # WARNING, not the library's default INFO: INFO switches on a log line for every
+    # HTTP request the program makes, which buries the output of `ask`.
+    server = MCPServer(name="readingroom", log_level="WARNING")
 
     # Each input carries its own explanation; Claude Code sees these next to the name.
     Query = Annotated[str, Field(description='Words to find. Put a phrase in "double quotes".')]

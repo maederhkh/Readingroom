@@ -6,6 +6,7 @@
     python -m readingroom inspect gdpr --article 5
     python -m readingroom search accuracy --law gdpr
     python -m readingroom search "\\"kept up to date\\""
+    python -m readingroom ask "What does the GDPR say about automated decision-making?"
 """
 import argparse
 import hashlib
@@ -13,7 +14,10 @@ import pathlib
 import sys
 
 from readingroom import shelf
+from readingroom.agent import MAX_SEARCHES, research
 from readingroom.articles import find_articles
+from readingroom.mcp_server import PROJECT, build_server
+from readingroom.model import OpenRouterModel
 from readingroom.pdf import read_clean_text
 from readingroom.search import KeywordIndex, load_passages
 
@@ -74,6 +78,45 @@ def search(args) -> int:
     return 0
 
 
+def ask(args) -> int:
+    _load_env()
+    try:
+        model = OpenRouterModel(args.model)
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 1
+    server = build_server(pathlib.Path(args.shelf))
+
+    def show(search) -> None:
+        law = f" law={search.law}" if search.law else ""
+        if search.error:
+            print(f"  ✗ search: {search.query}{law}  → refused: {search.error}")
+        else:
+            found = f"{search.result_count} articles" + (f" (top: {search.top})" if search.top else "")
+            print(f"  🔎 search: {search.query}{law}  → {found}")  # as the model wrote it
+
+    print(f"  [{model.model}]")
+    result = research(args.question, model, server, max_searches=args.max_searches, on_search=show)
+    print("\n  Answer\n")
+    print(result.answer)
+    if result.cut_off:
+        print("\n  ⚠ The answer was cut off at the length limit - it is incomplete.")
+    if result.hit_limit:
+        print(f"\n  ⚠ Stopped at the limit of {args.max_searches} searches; answered with what it had found.")
+    n = len(result.searches)
+    u = result.usage
+    cost = f" · ${u.cost:.4f}" if u.cost is not None else ""
+    print(f"\n  {n} search{'es' if n != 1 else ''} · {result.rounds} rounds · "
+          f"{u.input_tokens + u.output_tokens:,} tokens{cost}")
+    return 0
+
+
+def _load_env() -> None:
+    """Read OPENROUTER_API_KEY (and optionally READINGROOM_MODEL) from readingroom/.env."""
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT / ".env")
+
+
 def _show_page(shelf_dir: pathlib.Path, doc_id: str, page: int) -> int:
     doc = shelf.load(shelf_dir, doc_id)
     try:
@@ -125,6 +168,13 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=5)
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=search)
+
+    p = commands.add_parser("ask", help="research a question and answer it from the shelf")
+    p.add_argument("question")
+    p.add_argument("--model", help="an OpenRouter model name; default from .env or openai/gpt-5-mini")
+    p.add_argument("--max-searches", type=int, default=MAX_SEARCHES)
+    p.add_argument("--shelf", default="shelf")
+    p.set_defaults(command=ask)
     return parser
 
 
