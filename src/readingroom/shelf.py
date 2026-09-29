@@ -1,12 +1,15 @@
 """The shelf on disk: one folder per document.
 
-    shelf/gdpr/text.txt      the clean text - open it and read it
-    shelf/gdpr/pages.json    where each page begins, and which PDF it came from
+    shelf/gdpr/text.txt        the clean text - open it and read it
+    shelf/gdpr/pages.json      where each page begins, and which PDF it came from
+    shelf/gdpr/articles.json   one bookmark per article: title, chapter, pages, position
 """
 import json
 import pathlib
 import re
+from dataclasses import asdict
 
+from readingroom.articles import Article
 from readingroom.text import CleanText
 
 
@@ -35,6 +38,23 @@ def load(shelf: pathlib.Path, doc_id: str) -> CleanText:
     with open(shelf / doc_id / "text.txt", encoding="utf-8", newline="") as f:
         text = f.read()
     return CleanText(text=text, page_starts=tuple(details(shelf, doc_id)["page_starts"]))
+
+
+def save_articles(shelf: pathlib.Path, doc_id: str, articles: list[Article], doc: CleanText) -> None:
+    records = []
+    for article in articles:
+        record = asdict(article)
+        # Pages are looked up now so a reader of articles.json never has to.
+        record["page_start"] = doc.page_at(article.start)
+        record["page_end"] = doc.page_at(article.end - 1)
+        records.append(record)
+    text = json.dumps(records, indent=2, ensure_ascii=False)
+    (shelf / doc_id).mkdir(parents=True, exist_ok=True)
+    (shelf / doc_id / "articles.json").write_text(text, encoding="utf-8")
+
+
+def load_articles(shelf: pathlib.Path, doc_id: str) -> list[dict]:
+    return json.loads((shelf / doc_id / "articles.json").read_text(encoding="utf-8"))
 
 
 def details(shelf: pathlib.Path, doc_id: str) -> dict:

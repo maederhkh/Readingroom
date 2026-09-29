@@ -34,6 +34,19 @@ def test_shelf_lists_the_documents_it_holds(tmp_path):
     assert shelf.list_documents(tmp_path) == ["dsa", "gdpr"]
 
 
+def test_article_bookmarks_are_saved_with_their_pages(tmp_path):
+    from readingroom.articles import Article
+    doc = CleanText.from_pages(["Article 1\nScope\nText on page one", "more text on page two"])
+    article = Article(number=1, title="Scope", chapter="CHAPTER I — General", section=None,
+                      start=0, end=len(doc.text))
+    shelf.save_articles(tmp_path, "law", [article], doc)
+    [saved] = shelf.load_articles(tmp_path, "law")
+    assert saved == {
+        "number": 1, "title": "Scope", "chapter": "CHAPTER I — General", "section": None,
+        "page_start": 1, "page_end": 2, "start": 0, "end": len(doc.text),
+    }
+
+
 def test_details_record_where_the_text_came_from(tmp_path):
     doc = CleanText.from_pages(["one", "two"])
     shelf.save(tmp_path, "gdpr", doc, source_name="GDPR.pdf", source_sha256="abc123")

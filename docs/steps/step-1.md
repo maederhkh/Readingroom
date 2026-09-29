@@ -53,11 +53,31 @@ heading is not mistaken for an article).
 - **On Windows a plain text save writes `\r\n`**, which would shift every character
   position after the first line break. The shelf writes `\n` only, and a test checks it.
 
+## What we learned while building half 2
+
+- **Titles can run onto a second line, and the second line starts with a small letter**
+  ("...the rights of the data" / "subject"). This simple text rule was checked against
+  the PDFs' bold printing: they agree on all 306 headings. The same rule handles
+  chapter and section titles (three DSA section titles wrap).
+- **The AI Act's annexes come after the closing sentence** ("This Regulation shall be
+  binding in its entirety"), which appears exactly once per law. Stopping there keeps
+  out the fake `Article 49` - which turned out to be the second line of Annex VIII's
+  title, "...in accordance with" / "Article 49".
+- **`CHAPTER I` sits above `Article 1`**, so chapter headings are read from the top even
+  though articles are only counted from `Article 1`. A test caught the first version
+  missing it.
+- **Official typos are kept as printed**: AI Act Article 1's title is ``Subject matter` ``
+  (stray backtick) and Article 111's title ends "already placed on the marked".
+- Every real-document test was checked by breaking each rule on purpose (closing
+  sentence, title continuation, chapter headings) and confirming tests fail.
+
 ## How to check it yourself
 
 ```bash
 python -m readingroom ingest
+python -m readingroom inspect gdpr              # details + every article with its pages
 python -m readingroom inspect gdpr --page 35
+python -m readingroom inspect gdpr --article 5
 ```
 
 ## What counts as working
@@ -67,7 +87,11 @@ python -m readingroom inspect gdpr --page 35
 - No header or footer line survives on any page.
 - Every recital survives: 173 / 180 / 156.
 - The GDPR signatures survive.
-- *(half 2)* GDPR has 99 articles, AI Act 113, DSA 93 — exactly.
+- GDPR has 99 articles, AI Act 113, DSA 93 — exactly, numbered 1..N with none missing.
+- Every article knows its title, chapter, section and pages; GDPR Article 5 is
+  "Principles relating to processing of personal data", Chapter II, pages 35–36.
+
+**Status: step 1 complete (29 Sep 2026).** 65 tests, all passing.
 
 ## Deliberately left out of step 1
 
