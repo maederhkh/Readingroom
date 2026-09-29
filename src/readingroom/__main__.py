@@ -4,6 +4,8 @@
     python -m readingroom inspect gdpr            one document: its details and articles
     python -m readingroom inspect gdpr --page 35
     python -m readingroom inspect gdpr --article 5
+    python -m readingroom search accuracy --law gdpr
+    python -m readingroom search "\\"kept up to date\\""
 """
 import argparse
 import hashlib
@@ -13,6 +15,7 @@ import sys
 from readingroom import shelf
 from readingroom.articles import find_articles
 from readingroom.pdf import read_clean_text
+from readingroom.search import KeywordIndex, load_passages
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -53,6 +56,21 @@ def inspect(args) -> int:
     print(f"{args.document}: {d['pages']} pages, {d['characters']:,} characters, from {d['source']}")
     for a in shelf.load_articles(shelf_dir, args.document):
         print(f"  Article {a['number']:<4} {_pages(a):>10}   {a['title']}")
+    return 0
+
+
+def search(args) -> int:
+    index = KeywordIndex(load_passages(pathlib.Path(args.shelf)))
+    hits = index.search(args.query, limit=args.limit, laws=args.law)
+    if not hits:
+        print("No articles contain these words.")
+        return 0
+    for rank, hit in enumerate(hits, start=1):
+        p = hit.passage
+        pages = _pages({"page_start": p.page_start, "page_end": p.page_end})
+        print(f"{rank}. {p.doc_id} · Article {p.article} · {p.title} · {pages}   (score {hit.score:.2f})")
+        print(f"   {hit.snippet}")
+        print(f"   bookmark: {p.bookmark}\n")
     return 0
 
 
@@ -100,6 +118,13 @@ def _parser() -> argparse.ArgumentParser:
     shown.add_argument("--article", type=int, help="show this article's text")
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=inspect)
+
+    p = commands.add_parser("search", help="keyword search over the articles")
+    p.add_argument("query", help='words to find; put a phrase in "double quotes"')
+    p.add_argument("--law", action="append", help="only this law, e.g. gdpr (repeatable)")
+    p.add_argument("--limit", type=int, default=5)
+    p.add_argument("--shelf", default="shelf")
+    p.set_defaults(command=search)
     return parser
 
 

@@ -76,6 +76,24 @@ def test_inspect_an_article_that_does_not_exist(documents, tmp_path, capsys):
     assert "no Article 7" in capsys.readouterr().err
 
 
+def test_search_prints_the_matching_article_with_its_bookmark(documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    assert main(["search", "objectives", "--shelf", str(shelf)]) == 0
+    out = capsys.readouterr().out
+    assert "tiny-law · Article 1 · Subject-matter and objectives" in out
+    assert "tiny-law/article-1" in out
+
+
+def test_search_with_no_match_says_so(documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    assert main(["search", "zebra", "--shelf", str(shelf)]) == 0
+    assert "No articles contain these words." in capsys.readouterr().out
+
+
 def test_inspect_an_unknown_document_says_what_is_on_the_shelf(documents, tmp_path, capsys):
     shelf = tmp_path / "shelf"
     main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
