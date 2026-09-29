@@ -1,9 +1,11 @@
 """The research loop: readingroom's own chef.
 
-    ask the model  ->  it asks for a search  ->  run it  ->  hand back the results
+    ask the model  ->  it asks for a tool  ->  run it  ->  hand back the result
          ^                                                          |
          +----------------------------------------------------------+
-    ... until the model answers instead of asking for another search.
+    ... until the model answers instead of asking for another tool call.
+
+The tools: keyword_search (find articles) and read_article (open one in full).
 
 The tools come from the same MCP helper program Claude Code uses (mcp_server.py),
 called from inside this program - so both chefs see the same tool, the same
@@ -22,38 +24,39 @@ from readingroom.model import Reply, Usage
 # Minimal on purpose: the full research method is a later step. This only sets the
 # ground rules, so what the model does beyond them is visible.
 INSTRUCTIONS = """You answer questions using only the laws in this reading room, which you \
-can search with the keyword_search tool.
-- Base every statement on text the tool returned. Do not rely on your own knowledge of these laws.
+can search and read with your tools.
+- Base every statement on text the tools returned. Do not rely on your own knowledge of these laws.
 - After each statement, cite the bookmark and pages it comes from, e.g. [gdpr/article-5, pp. 35–36].
-- If the tool results do not contain the answer, say so plainly instead of guessing."""
+- If the tools' results do not contain the answer, say so plainly instead of guessing."""
 
-MAX_SEARCHES = 10
-FINAL_ANSWER_NOW = ("You have no searches left. Write your final answer now, using only the "
-                    "search results above, with a citation after each statement. If they are "
+MAX_TOOL_CALLS = 12  # searches and reads together; both cost money
+FINAL_ANSWER_NOW = ("You have no tool calls left. Write your final answer now, using only the "
+                    "tool results above, with a citation after each statement. If they are "
                     "not enough to answer fully, say what is missing.")
 
 
 @dataclass(frozen=True)
-class Search:
-    query: str
-    law: str | None
-    result_count: int
-    top: str | None           # bookmark of the best result
-    error: str | None = None  # why the search was refused, if it was
+class Step:
+    """One tool call: what the model asked for, and what came back."""
+
+    tool: str                 # "keyword_search" or "read_article"
+    arguments: dict
+    result: dict | None       # the tool's answer, if it gave one
+    error: str | None = None  # why the call was refused, if it was
 
 
 @dataclass
 class Research:
     answer: str
-    searches: list[Search] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
     rounds: int = 0          # how many times the model was asked
     usage: Usage = Usage()
-    hit_limit: bool = False  # stopped because it reached the search limit
+    hit_limit: bool = False  # stopped because it reached the tool-call limit
     cut_off: bool = False    # the final answer hit the length limit
 
 
-def research(question: str, model, server: MCPServer, max_searches: int = MAX_SEARCHES,
-             on_search: Callable[[Search], None] = lambda s: None) -> Research:
+def research(question: str, model, server: MCPServer, max_tool_calls: int = MAX_TOOL_CALLS,
+             on_step: Callable[[Step], None] = lambda s: None) -> Research:
     tools = [_as_model_tool(t) for t in anyio.run(server.list_tools)]
     messages = [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": question}]
     result = Research(answer="")
@@ -68,15 +71,16 @@ def research(question: str, model, server: MCPServer, max_searches: int = MAX_SE
 
         messages.append(_remember_request(reply))  # the model must see its own request
         for call in reply.tool_calls:
-            done = len([s for s in result.searches if s.error is None])
-            if done >= max_searches:
+            done = len([s for s in result.steps if s.error is None])
+            if done >= max_tool_calls:
                 result.hit_limit = True
-                content = {"error": f"Search limit of {max_searches} reached. "
+                content = {"error": f"Tool-call limit of {max_tool_calls} reached. "
                                     "Answer now with what you have found."}
             else:
-                search, content = _run(server, call)
-                result.searches.append(search)
-                on_search(search)
+                step = _run(server, call)
+                result.steps.append(step)
+                on_step(step)
+                content = step.result if step.error is None else {"error": step.error}
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": json.dumps(content, ensure_ascii=False)})
         if result.hit_limit:
@@ -85,20 +89,16 @@ def research(question: str, model, server: MCPServer, max_searches: int = MAX_SE
             messages.append({"role": "user", "content": FINAL_ANSWER_NOW})
 
 
-def _run(server: MCPServer, call) -> tuple[Search, dict]:
+def _run(server: MCPServer, call) -> Step:
     """Carry out one tool call. Problems go back to the model as an error it can act on."""
     try:
         arguments = json.loads(call.arguments)
     except json.JSONDecodeError:
-        error = f"The arguments were not valid JSON: {call.arguments}"
-        return Search(query="?", law=None, result_count=0, top=None, error=error), {"error": error}
-    query, law = str(arguments.get("query", "")), arguments.get("law")
+        return Step(call.name, {}, None, error=f"The arguments were not valid JSON: {call.arguments}")
     try:
-        answer = anyio.run(server.call_tool, call.name, arguments).structured_content
+        return Step(call.name, arguments, anyio.run(server.call_tool, call.name, arguments).structured_content)
     except ToolError as refusal:
-        return Search(query, law, 0, None, error=str(refusal)), {"error": str(refusal)}
-    results = answer["results"]
-    return Search(query, law, len(results), results[0]["bookmark"] if results else None), answer
+        return Step(call.name, arguments, None, error=str(refusal))
 
 
 def _as_model_tool(tool) -> dict:

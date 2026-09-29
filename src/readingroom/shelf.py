@@ -57,6 +57,22 @@ def load_articles(shelf: pathlib.Path, doc_id: str) -> list[dict]:
     return json.loads((shelf / doc_id / "articles.json").read_text(encoding="utf-8"))
 
 
+def articles_by_bookmark(shelf: pathlib.Path) -> dict[str, dict]:
+    """Every article on the shelf, looked up by its bookmark ("gdpr/article-22"),
+    with its full text cut from the one clean copy of its law."""
+    library = {}
+    for doc_id in list_documents(shelf):
+        text = load(shelf, doc_id).text
+        for a in load_articles(shelf, doc_id):
+            library[f"{doc_id}/article-{a['number']}"] = {
+                "law": doc_id, "article": a["number"], "title": a["title"],
+                "chapter": a["chapter"], "section": a["section"],
+                "page_start": a["page_start"], "page_end": a["page_end"],
+                "text": text[a["start"]:a["end"]],
+            }
+    return library
+
+
 def details(shelf: pathlib.Path, doc_id: str) -> dict:
     return json.loads((shelf / doc_id / "pages.json").read_text(encoding="utf-8"))
 

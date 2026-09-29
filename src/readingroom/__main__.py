@@ -14,7 +14,7 @@ import pathlib
 import sys
 
 from readingroom import shelf
-from readingroom.agent import MAX_SEARCHES, research
+from readingroom.agent import MAX_TOOL_CALLS, research
 from readingroom.articles import find_articles
 from readingroom.mcp_server import PROJECT, build_server
 from readingroom.model import OpenRouterModel
@@ -87,28 +87,43 @@ def ask(args) -> int:
         return 1
     server = build_server(pathlib.Path(args.shelf))
 
-    def show(search) -> None:
-        law = f" law={search.law}" if search.law else ""
-        if search.error:
-            print(f"  ✗ search: {search.query}{law}  → refused: {search.error}")
-        else:
-            found = f"{search.result_count} articles" + (f" (top: {search.top})" if search.top else "")
-            print(f"  🔎 search: {search.query}{law}  → {found}")  # as the model wrote it
-
     print(f"  [{model.model}]")
-    result = research(args.question, model, server, max_searches=args.max_searches, on_search=show)
+    result = research(args.question, model, server, max_tool_calls=args.max_tool_calls, on_step=_show_step)
     print("\n  Answer\n")
     print(result.answer)
     if result.cut_off:
         print("\n  ⚠ The answer was cut off at the length limit - it is incomplete.")
     if result.hit_limit:
-        print(f"\n  ⚠ Stopped at the limit of {args.max_searches} searches; answered with what it had found.")
-    n = len(result.searches)
+        print(f"\n  ⚠ Stopped at the limit of {args.max_tool_calls} tool calls; answered with what it had found.")
+    searches = sum(s.tool == "keyword_search" for s in result.steps)
+    reads = sum(s.tool == "read_article" for s in result.steps)
     u = result.usage
     cost = f" · ${u.cost:.4f}" if u.cost is not None else ""
-    print(f"\n  {n} search{'es' if n != 1 else ''} · {result.rounds} rounds · "
-          f"{u.input_tokens + u.output_tokens:,} tokens{cost}")
+    print(f"\n  {searches} search{'es' if searches != 1 else ''} · {reads} read{'s' if reads != 1 else ''} · "
+          f"{result.rounds} rounds · {u.input_tokens + u.output_tokens:,} tokens{cost}")
     return 0
+
+
+def _show_step(step) -> None:
+    """One line per tool call, printed as it happens. Queries are shown as the model wrote them."""
+    if step.tool == "keyword_search":
+        law = f" law={step.arguments['law']}" if step.arguments.get("law") else ""
+        head = f"  🔎 search: {step.arguments.get('query', '?')}{law}"
+        if step.error is None:
+            results = step.result["results"]
+            top = f" (top: {results[0]['bookmark']})" if results else ""
+            print(f"{head}  → {len(results)} articles{top}")
+            return
+    elif step.tool == "read_article":
+        head = f"  📖 read: {step.arguments.get('bookmark', '?')}"
+        if step.error is None:
+            r = step.result
+            pages = f"pp. {r['pages']}" if "–" in r["pages"] else f"p. {r['pages']}"
+            print(f"{head}  → {r['title']} ({pages})")
+            return
+    else:
+        head = f"  ? {step.tool}"
+    print(f"{head}  → refused: {step.error}")
 
 
 def _load_env() -> None:
@@ -172,7 +187,8 @@ def _parser() -> argparse.ArgumentParser:
     p = commands.add_parser("ask", help="research a question and answer it from the shelf")
     p.add_argument("question")
     p.add_argument("--model", help="an OpenRouter model name; default from .env or openai/gpt-5-mini")
-    p.add_argument("--max-searches", type=int, default=MAX_SEARCHES)
+    p.add_argument("--max-tool-calls", type=int, default=MAX_TOOL_CALLS,
+                   help="searches and reads together")
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=ask)
     return parser

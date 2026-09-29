@@ -1,4 +1,7 @@
-"""The MCP helper program that hands `keyword_search` to Claude Code."""
+"""The MCP helper program that hands readingroom's tools to Claude Code.
+
+read_article has its own file, tests/test_read_article.py.
+"""
 import sys
 
 import anyio
@@ -20,8 +23,8 @@ INDEX = KeywordIndex([GDPR_5, DSA_12])
 LAWS = ["digital-services-act", "gdpr"]
 
 
-def call_over_connection(shelf, arguments):
-    """Start the helper program as its own process and call keyword_search, as Claude Code does."""
+def call_over_connection(shelf, arguments, tool="keyword_search"):
+    """Start the helper program as its own process and call a tool, as Claude Code does."""
     server = StdioServerParameters(command=sys.executable, args=["-m", "readingroom.mcp_server"],
                                    env={"READINGROOM_SHELF": str(shelf)})
 
@@ -29,7 +32,7 @@ def call_over_connection(shelf, arguments):
         async with stdio_client(server) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                return await session.call_tool("keyword_search", arguments)
+                return await session.call_tool(tool, arguments)
 
     return anyio.run(ask)
 
@@ -80,14 +83,15 @@ def test_the_description_names_the_laws_and_says_what_the_tool_cannot_do():
     assert "digital-services-act, gdpr" in text
     assert "not meaning" in text               # an honest limit, so the agent searches again
     assert '"double quotes"' in text           # how to ask for a phrase
+    assert "read_article" in text              # where to go for the whole article
     assert "recitals" in text                  # what is not searched
 
 
-def test_the_server_offers_exactly_one_tool(documents, tmp_path):
+def test_the_server_offers_search_and_reading(documents, tmp_path):
     shelf = tmp_path / "shelf"
     main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
     tools = anyio.run(build_server(shelf).list_tools)
-    assert [t.name for t in tools] == ["keyword_search"]
+    assert [t.name for t in tools] == ["keyword_search", "read_article"]
 
 
 def test_a_refused_request_tells_claude_code_why(documents, tmp_path):
@@ -103,8 +107,8 @@ def test_a_refused_request_tells_claude_code_why(documents, tmp_path):
 def test_every_input_is_explained_to_claude_code(documents, tmp_path):
     shelf = tmp_path / "shelf"
     main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
-    [tool] = anyio.run(build_server(shelf).list_tools)
-    for name, field in tool.input_schema["properties"].items():
+    tool = anyio.run(build_server(shelf).list_tools)[0]
+    for name, field in tool.input_schema["properties"].items():  # keyword_search
         assert field.get("description"), f"'{name}' has no description"
     assert "tiny-law" in tool.input_schema["properties"]["law"]["description"]
 

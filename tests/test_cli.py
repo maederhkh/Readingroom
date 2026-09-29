@@ -105,7 +105,19 @@ def test_ask_shows_each_search_then_the_answer_then_the_cost(documents, tmp_path
     out = capsys.readouterr().out
     assert "search: objectives" in out and "tiny-law/article-1" in out
     assert "Article 1 sets out the objectives" in out
-    assert "1 search · 2 rounds · 360 tokens" in out
+    assert "1 search · 0 reads · 2 rounds · 360 tokens" in out
+
+
+def test_ask_shows_an_article_being_read(documents, tmp_path, capsys, fake_model):
+    from tests.test_agent import answers, asks_to_read
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
+    fake_model(asks_to_read("tiny-law/article-1"), answers("done"))
+    capsys.readouterr()
+    main(["ask", "q", "--shelf", str(shelf)])
+    out = capsys.readouterr().out
+    assert "read: tiny-law/article-1  → Subject-matter and objectives (p. 1)" in out
+    assert "0 searches · 1 read · 2 rounds" in out
 
 
 def test_ask_warns_when_the_answer_was_cut_off(documents, tmp_path, capsys, fake_model):

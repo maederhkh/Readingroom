@@ -6,10 +6,11 @@ answers tool calls until Claude Code closes it.
 
     python -m readingroom.mcp_server          uses ./shelf, or $READINGROOM_SHELF
 
-For now there is one tool: keyword_search.
+Two tools: keyword_search finds articles; read_article opens one in full.
 """
 import os
 import pathlib
+import re
 from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
@@ -42,7 +43,39 @@ Only articles are searched, not recitals or annexes.
 
 Each result gives the law, article number, title, pages, a short verbatim passage
 where the words appear, and a bookmark such as gdpr/article-5. The passage is an
-excerpt from the article, not the whole article."""
+excerpt from the article, not the whole article: to read the article in full, pass
+its bookmark to read_article."""
+
+
+def read_article_description(laws: list[str]) -> str:
+    return f"""Read one whole article, word for word, by its bookmark - for example
+gdpr/article-22. Bookmarks come from keyword_search results.
+Laws available: {", ".join(laws)}.
+
+Returns the article's full text with its title, chapter, section and pages. Use it
+when a search excerpt looks relevant: the excerpt is only a fragment, and the rest of
+the article - later paragraphs, conditions, exceptions - can change what it means."""
+
+
+BOOKMARK = re.compile(r"(?P<law>[a-z0-9-]+)/article-(?P<number>\d+)")
+
+
+def read_article_result(library: dict[str, dict], laws: list[str], bookmark: str) -> dict[str, Any]:
+    """The tool's answer, as plain data. Raises ValueError for a request it cannot serve."""
+    shape = BOOKMARK.fullmatch(bookmark.strip())
+    if not shape:
+        raise ValueError(f"'{bookmark}' is not a bookmark. Bookmarks look like gdpr/article-22, "
+                         "as given in keyword_search results.")
+    law = shape["law"]
+    if law not in laws:
+        raise ValueError(f"No law called '{law}' on the shelf. Laws available: {', '.join(laws)}.")
+    if bookmark.strip() not in library:
+        numbers = [a["article"] for a in library.values() if a["law"] == law]
+        raise ValueError(f"No {bookmark.strip()}. {law} has Articles {min(numbers)}–{max(numbers)}.")
+    a = library[bookmark.strip()]
+    return {"bookmark": bookmark.strip(), "law": law, "article": a["article"], "title": a["title"],
+            "chapter": a["chapter"], "section": a["section"],
+            "pages": _pages(a["page_start"], a["page_end"]), "text": a["text"]}
 
 
 def keyword_search_result(index: KeywordIndex, laws: list[str], query: str,
@@ -63,6 +96,7 @@ def keyword_search_result(index: KeywordIndex, laws: list[str], query: str,
 def build_server(shelf_dir: pathlib.Path) -> MCPServer:
     laws = shelf.list_documents(shelf_dir)
     index = KeywordIndex(load_passages(shelf_dir))  # built once, at startup
+    library = shelf.articles_by_bookmark(shelf_dir)
     # WARNING, not the library's default INFO: INFO switches on a log line for every
     # HTTP request the program makes, which buries the output of `ask`.
     server = MCPServer(name="readingroom", log_level="WARNING")
@@ -82,14 +116,26 @@ def build_server(shelf_dir: pathlib.Path) -> MCPServer:
             # treated as a crash and reaches it only as "Error executing tool".
             raise ToolError(str(refusal)) from refusal
 
+    Bookmark = Annotated[str, Field(description="The article's bookmark, e.g. gdpr/article-22.")]
+
+    @server.tool(description=read_article_description(laws))
+    def read_article(bookmark: Bookmark) -> dict[str, Any]:
+        try:
+            return read_article_result(library, laws, bookmark)
+        except ValueError as refusal:
+            raise ToolError(str(refusal)) from refusal
+
     return server
 
 
 def _result(hit) -> dict[str, Any]:
     p = hit.passage
-    pages = str(p.page_start) if p.page_start == p.page_end else f"{p.page_start}–{p.page_end}"
     return {"bookmark": p.bookmark, "law": p.doc_id, "article": p.article, "title": p.title,
-            "pages": pages, "passage": hit.snippet, "score": round(hit.score, 2)}
+            "pages": _pages(p.page_start, p.page_end), "passage": hit.snippet, "score": round(hit.score, 2)}
+
+
+def _pages(start: int, end: int) -> str:
+    return str(start) if start == end else f"{start}–{end}"
 
 
 def main() -> None:

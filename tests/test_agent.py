@@ -29,6 +29,12 @@ class FakeModel:
         return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
 
 
+def asks_to_read(bookmark, call_id="read-1"):
+    return Reply(text="", tool_calls=[ToolCall(id=call_id, name="read_article",
+                                               arguments=json.dumps({"bookmark": bookmark}))],
+                 cut_off=False, usage=Usage(input_tokens=100, output_tokens=10))
+
+
 def asks_to_search(query, call_id="call-1", **arguments):
     return Reply(text="", tool_calls=[ToolCall(id=call_id, name="keyword_search",
                                                arguments=json.dumps({"query": query, **arguments}))],
@@ -61,18 +67,18 @@ def test_the_model_gets_the_instructions_and_the_question(server):
 
 def test_the_model_sees_the_same_tool_claude_code_sees(server):
     import anyio
-    [mcp_tool] = anyio.run(server.list_tools)
+    mcp_tools = anyio.run(server.list_tools)
     model = FakeModel(answers("done"))
     research("q", model, server)
     _, tools = model.requests[0]
     assert tools == [{"type": "function", "function": {
-        "name": "keyword_search", "description": mcp_tool.description, "parameters": mcp_tool.input_schema}}]
+        "name": t.name, "description": t.description, "parameters": t.input_schema}} for t in mcp_tools]
 
 
 def test_an_answer_without_searching_ends_the_loop(server):
     result = research("q", FakeModel(answers("An answer.")), server)
     assert result.answer == "An answer."
-    assert result.searches == []
+    assert result.steps == []
     assert result.rounds == 1
 
 
@@ -96,11 +102,20 @@ def test_the_models_own_request_is_kept_in_the_conversation(server):
     assert assistant["tool_calls"][0]["function"]["name"] == "keyword_search"
 
 
-def test_each_search_is_reported_as_it_happens(server):
+def test_each_step_is_reported_as_it_happens(server):
     seen = []
-    research("q", FakeModel(asks_to_search("objectives"), answers("done")), server, on_search=seen.append)
-    [search] = seen
-    assert (search.query, search.result_count, search.top) == ("objectives", 1, "tiny-law/article-1")
+    research("q", FakeModel(asks_to_search("objectives"), answers("done")), server, on_step=seen.append)
+    [step] = seen
+    assert (step.tool, step.arguments["query"]) == ("keyword_search", "objectives")
+    assert step.result["results"][0]["bookmark"] == "tiny-law/article-1"
+
+
+def test_a_requested_article_is_read_and_handed_back_whole(server):
+    model = FakeModel(asks_to_read("tiny-law/article-1"), answers("done"))
+    result = research("q", model, server)
+    [tool_message] = tool_messages(model)
+    assert json.loads(tool_message["content"])["text"] == "Article 1\nSubject-matter and objectives"
+    assert [s.tool for s in result.steps] == ["read_article"]
 
 
 def test_a_refused_search_is_handed_back_so_the_model_can_correct_itself(server):
@@ -108,7 +123,7 @@ def test_a_refused_search_is_handed_back_so_the_model_can_correct_itself(server)
     result = research("q", model, server)
     [tool_message] = tool_messages(model)
     assert "No law called 'gdpr' on the shelf. Laws available: tiny-law." in tool_message["content"]
-    assert result.searches[0].error is not None
+    assert result.steps[0].error is not None
 
 
 def test_arguments_that_are_not_valid_json_are_handed_back_as_an_error(server):
@@ -119,20 +134,21 @@ def test_arguments_that_are_not_valid_json_are_handed_back_as_an_error(server):
     assert "not valid JSON" in tool_messages(model)[0]["content"]
 
 
-def test_the_search_limit_stops_a_model_that_never_finishes(server):
-    model = FakeModel(asks_to_search("objectives"), asks_to_search("objectives"),
+def test_the_tool_call_limit_stops_a_model_that_never_finishes(server):
+    # Reading counts towards the limit as well as searching: both cost money.
+    model = FakeModel(asks_to_search("objectives"), asks_to_read("tiny-law/article-1"),
                       asks_to_search("objectives"), answers("What I found so far."))
-    result = research("q", model, server, max_searches=2)
-    assert len([s for s in result.searches if s.error is None]) == 2
+    result = research("q", model, server, max_tool_calls=2)
+    assert [s.tool for s in result.steps] == ["keyword_search", "read_article"]
     assert result.hit_limit
-    assert "Search limit of 2 reached" in tool_messages(model)[-1]["content"]
+    assert "Tool-call limit of 2 reached" in tool_messages(model)[-1]["content"]
     last_messages, last_tools = model.requests[-1]
     assert last_tools is None                      # the final request offers no tools
     # ...and says so plainly, in its own message. A note tucked inside the last tool
     # result was not enough: in the first real run gpt-5-mini wrote more search
     # requests as plain text instead of answering.
     assert last_messages[-1]["role"] == "user"
-    assert "no searches left" in last_messages[-1]["content"]
+    assert "no tool calls left" in last_messages[-1]["content"]
     assert result.answer == "What I found so far."
 
 
