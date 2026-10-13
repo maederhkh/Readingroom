@@ -78,7 +78,7 @@ def test_search_with_no_match_says_so(documents, tmp_path, capsys):
     main(["ingest", "--documents", str(documents), "--shelf", str(shelf)])
     capsys.readouterr()
     assert main(["search", "zebra", "--shelf", str(shelf)]) == 0
-    assert "No articles contain these words." in capsys.readouterr().out
+    assert "Nothing contains these words." in capsys.readouterr().out
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ def test_ask_shows_an_article_being_read(documents, tmp_path, capsys, fake_model
     capsys.readouterr()
     main(["ask", "q", "--shelf", str(shelf)])
     out = capsys.readouterr().out
-    assert "read: tiny-law/article-1  → Subject-matter and objectives (p. 1)" in out
+    assert "read: tiny-law/article-1  → Article 1 — Subject-matter and objectives (p. 1)" in out
     assert "0 searches · 1 read · 2 rounds" in out
 
 
@@ -191,3 +191,23 @@ def test_inspect_a_recital_that_does_not_exist(full_documents, tmp_path, capsys)
     capsys.readouterr()
     assert main(["inspect", "full-law", "--recital", "9", "--shelf", str(shelf)]) == 1
     assert "full-law has no Recital 9" in capsys.readouterr().err
+
+
+def test_search_shows_the_kind_of_each_result_and_can_be_limited_to_one(full_documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    main(["search", "explains", "--shelf", str(shelf)])
+    assert "full-law · Recital 1 ·" in capsys.readouterr().out
+    main(["search", "explains", "--kind", "article", "--shelf", str(shelf)])
+    assert "Nothing contains these words." in capsys.readouterr().out
+
+
+def test_ask_shows_a_recital_being_read(full_documents, tmp_path, capsys, fake_model):
+    from tests.test_agent import answers, asks_to_read
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    fake_model(asks_to_read("full-law/recital-2"), answers("done"))
+    capsys.readouterr()
+    main(["ask", "q", "--shelf", str(shelf)])
+    assert "read: full-law/recital-2  → Recital 2 (p. 1)" in capsys.readouterr().out

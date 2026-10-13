@@ -84,14 +84,16 @@ def inspect(args) -> int:
 
 def search(args) -> int:
     index = KeywordIndex(load_passages(pathlib.Path(args.shelf)))
-    hits = index.search(args.query, limit=args.limit, laws=args.law)
+    hits = (index.search(args.query, limit=args.limit, laws=args.law, kinds=args.kind) if args.kind
+            else index.search_grouped(args.query, limit=args.limit, laws=args.law))
     if not hits:
-        print("No articles contain these words.")
+        print("Nothing contains these words.")
         return 0
     for rank, hit in enumerate(hits, start=1):
         p = hit.passage
         pages = _pages({"page_start": p.page_start, "page_end": p.page_end})
-        print(f"{rank}. {p.doc_id} · Article {p.article} · {p.title} · {pages}   (score {hit.score:.2f})")
+        title = f" · {p.title}" if p.title else ""
+        print(f"{rank}. {p.doc_id} · {p.label}{title} · {pages}   (score {hit.score:.2f})")
         print(f"   {hit.snippet}")
         print(f"   bookmark: {p.bookmark}\n")
     return 0
@@ -115,7 +117,7 @@ def ask(args) -> int:
     if result.hit_limit:
         print(f"\n  ⚠ Stopped at the limit of {args.max_tool_calls} tool calls; answered with what it had found.")
     searches = sum(s.tool == "keyword_search" for s in result.steps)
-    reads = sum(s.tool == "read_article" for s in result.steps)
+    reads = sum(s.tool == "read" for s in result.steps)
     u = result.usage
     cost = f" · ${u.cost:.4f}" if u.cost is not None else ""
     print(f"\n  {searches} search{'es' if searches != 1 else ''} · {reads} read{'s' if reads != 1 else ''} · "
@@ -126,20 +128,26 @@ def ask(args) -> int:
 def _show_step(step) -> None:
     """One line per tool call, printed as it happens. Queries are shown as the model wrote them."""
     if step.tool == "keyword_search":
-        law = f" law={step.arguments['law']}" if step.arguments.get("law") else ""
-        head = f"  🔎 search: {step.arguments.get('query', '?')}{law}"
+        filters = "".join(f" {k}={step.arguments[k]}" for k in ("law", "kind") if step.arguments.get(k))
+        head = f"  🔎 search: {step.arguments.get('query', '?')}{filters}"
         if step.error is None:
             results = step.result["results"]
             top = f" (top: {results[0]['bookmark']})" if results else ""
-            print(f"{head}  → {len(results)} articles{top}")
+            print(f"{head}  → {len(results)} results{top}")
             return
-    elif step.tool == "read_article":
+    elif step.tool == "read":
         head = f"  📖 read: {step.arguments.get('bookmark', '?')}"
         if step.error is None:
             r = step.result
             pages = f"pp. {r['pages']}" if "–" in r["pages"] else f"p. {r['pages']}"
-            print(f"{head}  → {r['title']} ({pages})")
+            title = f" — {r['title']}" if r["title"] else ""
+            print(f"{head}  → {r['label']}{title} ({pages})")
             return
+    elif step.tool == "list_documents":
+        if step.error is None:
+            print(f"  📚 list documents  → {', '.join(d['law'] for d in step.result['documents'])}")
+            return
+        head = "  📚 list documents"
     else:
         head = f"  ? {step.tool}"
     print(f"{head}  → refused: {step.error}")
@@ -212,9 +220,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=inspect)
 
-    p = commands.add_parser("search", help="keyword search over the articles")
+    p = commands.add_parser("search", help="keyword search over articles, recitals and annexes")
     p.add_argument("query", help='words to find; put a phrase in "double quotes"')
     p.add_argument("--law", action="append", help="only this law, e.g. gdpr (repeatable)")
+    p.add_argument("--kind", action="append", choices=["article", "recital", "annex"],
+                   help="only this kind of part (repeatable)")
     p.add_argument("--limit", type=int, default=5)
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=search)

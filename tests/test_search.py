@@ -1,4 +1,4 @@
-"""Keyword search: which articles match the words, and in what order.
+"""Keyword search: which parts of the laws match the words, and in what order.
 
 The scoring rules are shown on tiny made-up articles, where each rule is easy to see.
 tests/test_real_search.py checks the same search on the real laws.
@@ -6,13 +6,13 @@ tests/test_real_search.py checks the same search on the real laws.
 from readingroom.search import KeywordIndex, Passage, tokenize
 
 
-def passage(number, text, doc_id="law"):
-    return Passage(doc_id=doc_id, article=number, title=f"Title {number}",
+def passage(number, text, doc_id="law", kind="article"):
+    return Passage(doc_id=doc_id, kind=kind, number=number, title=f"Title {number}",
                    page_start=1, page_end=1, text=text)
 
 
 def numbers(hits):
-    return [hit.passage.article for hit in hits]
+    return [hit.passage.number for hit in hits]
 
 
 def test_words_are_lowercased_and_split_on_anything_not_a_letter_or_digit():
@@ -51,7 +51,7 @@ def test_repeating_a_word_helps_less_each_time():
                           passage(2, "consent " * 2 + "x " * 19),
                           passage(20, "consent " * 20 + "x " * 1),
                           passage(99, "unrelated")])
-    score = {hit.passage.article: hit.score for hit in index.search("consent")}
+    score = {hit.passage.number: hit.score for hit in index.search("consent")}
     second_mention = score[2] - score[1]
     each_later_mention = (score[20] - score[2]) / 18
     assert second_mention > each_later_mention
@@ -113,5 +113,46 @@ def test_the_snippet_shows_the_words_where_they_appear():
     assert len(hit.snippet) < 400
 
 
-def test_the_bookmark_names_the_law_and_article():
+def test_the_bookmark_names_the_law_the_kind_and_the_number():
     assert passage(5, "x", doc_id="gdpr").bookmark == "gdpr/article-5"
+    assert passage(71, "x", doc_id="gdpr", kind="recital").bookmark == "gdpr/recital-71"
+    assert passage("III", "x", doc_id="eu-ai-act", kind="annex").bookmark == "eu-ai-act/annex-III"
+
+
+def test_the_label_is_how_a_lawyer_would_cite_it():
+    assert passage(5, "x").label == "Article 5"
+    assert passage(71, "x", kind="recital").label == "Recital 71"
+    assert passage("III", "x", kind="annex").label == "Annex III"
+
+
+def test_search_can_be_limited_to_some_kinds():
+    index = KeywordIndex([passage(22, "automated decision", kind="article"),
+                          passage(71, "automated decision", kind="recital"),
+                          passage("III", "automated decision", kind="annex")])
+    assert [h.passage.kind for h in index.search("automated", kinds=["recital"])] == ["recital"]
+    assert {h.passage.kind for h in index.search("automated", kinds=["article", "annex"])} == {"article", "annex"}
+
+
+def test_grouped_search_puts_articles_first_even_when_a_recital_scores_higher():
+    # The real problem: recitals repeat the key words in plain sentences and outscore
+    # the binding article. "prohibited AI practices" returned five recitals and no articles.
+    index = KeywordIndex([passage(5, "the following practices shall be prohibited " + "x " * 40),
+                          passage(28, "prohibited practices prohibited practices", kind="recital"),
+                          passage("III", "prohibited practices list", kind="annex"),
+                          passage(9, "unrelated")])
+    assert index.search("prohibited practices")[0].passage.kind == "recital"     # the problem
+    assert [h.passage.bookmark for h in index.search_grouped("prohibited practices")] == [
+        "law/article-5", "law/recital-28", "law/annex-III"]
+
+
+def test_grouped_search_takes_the_best_few_of_each_kind():
+    index = KeywordIndex([passage(n, "consent") for n in range(1, 9)]
+                         + [passage(n, "consent", kind="recital") for n in range(1, 9)]
+                         + [passage(n, "consent", kind="annex") for n in ("I", "II", "III", "IV")])
+    kinds = [h.passage.kind for h in index.search_grouped("consent", limit=4)]
+    assert kinds == ["article"] * 4 + ["recital"] * 3 + ["annex"] * 2
+
+
+def test_grouped_search_respects_the_law_filter():
+    index = KeywordIndex([passage(1, "consent", doc_id="gdpr"), passage(1, "consent", doc_id="dsa", kind="recital")])
+    assert [h.passage.doc_id for h in index.search_grouped("consent", laws=["gdpr"])] == ["gdpr"]

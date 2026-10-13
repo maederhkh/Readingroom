@@ -76,19 +76,29 @@ def load_articles(shelf: pathlib.Path, doc_id: str) -> list[dict]:
     return json.loads((shelf / doc_id / "articles.json").read_text(encoding="utf-8"))
 
 
-def articles_by_bookmark(shelf: pathlib.Path) -> dict[str, dict]:
-    """Every article on the shelf, looked up by its bookmark ("gdpr/article-22"),
-    with its full text cut from the one clean copy of its law."""
+KINDS = ("article", "recital", "annex")
+LABEL = {"article": "Article", "recital": "Recital", "annex": "Annex"}
+
+
+def units_by_bookmark(shelf: pathlib.Path) -> dict[str, dict]:
+    """Every article, recital and annex on the shelf, by bookmark ("gdpr/recital-71"),
+    with its full text cut from the one clean copy of its law. Search and reading both
+    use this list, so they can never disagree about what exists."""
     library = {}
     for doc_id in list_documents(shelf):
         text = load(shelf, doc_id).text
-        for a in load_articles(shelf, doc_id):
-            library[f"{doc_id}/article-{a['number']}"] = {
-                "law": doc_id, "article": a["number"], "title": a["title"],
-                "chapter": a["chapter"], "section": a["section"],
-                "page_start": a["page_start"], "page_end": a["page_end"],
-                "text": text[a["start"]:a["end"]],
-            }
+        found = {"article": load_articles(shelf, doc_id),
+                 "recital": load_units(shelf, doc_id, "recitals"),
+                 "annex": load_units(shelf, doc_id, "annexes")}
+        for kind in KINDS:
+            for u in found[kind]:
+                library[f"{doc_id}/{kind}-{u['number']}"] = {
+                    "law": doc_id, "kind": kind, "number": u["number"],
+                    "label": f"{LABEL[kind]} {u['number']}",
+                    "title": u.get("title"), "chapter": u.get("chapter"), "section": u.get("section"),
+                    "page_start": u["page_start"], "page_end": u["page_end"],
+                    "text": text[u["start"]:u["end"]],
+                }
     return library
 
 

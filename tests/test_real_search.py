@@ -18,8 +18,17 @@ def index(tmp_path_factory):
     return KeywordIndex(load_passages(shelf))
 
 
-def test_every_article_of_every_law_is_searchable(index):
-    assert len(index.passages) == 99 + 113 + 93
+def test_every_article_recital_and_annex_of_every_law_is_searchable(index):
+    kinds = [p.kind for p in index.passages]
+    assert kinds.count("article") == 99 + 113 + 93
+    assert kinds.count("recital") == 173 + 180 + 156
+    assert kinds.count("annex") == 13
+
+
+def test_the_phrase_that_was_invisible_is_found_in_recital_71(index):
+    # Before recitals were searchable this returned nothing at all.
+    [hit] = index.search('"explanation of the decision"', laws=["gdpr"])
+    assert hit.passage.bookmark == "gdpr/recital-71"
 
 
 def test_accuracy_in_the_gdpr_finds_exactly_the_two_articles_using_the_word(index):

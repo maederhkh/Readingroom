@@ -43,8 +43,7 @@ appears word for word.
 Reading more is cheaper than searching blindly: one search plus reading whole articles
 used a quarter of the tokens of ten searches for fragments.
 
-**Still to come in step 4:** read the text around a hit (for recitals and anything outside
-article boundaries), and list the documents.
+*(4b below replaced the planned "read around a hit" tool.)*
 
 **Status:** 131 tests, all passing.
 
@@ -91,5 +90,47 @@ title, "Having regard to…" lines, chapter headings and signatures.
 - The "annexes only after the closing sentence" rule is never needed in these three
   laws, so breaking it changed no real-document test. A dedicated test now guards it.
 
-**Status:** 163 tests, all passing. Half 2: search, `read` and `list_documents` cover
-all three kinds of bookmark.
+**Status of half 1:** 163 tests, all passing.
+
+### Half 2 — the agent can find and read them
+
+- **One list of parts.** `shelf.units_by_bookmark()` holds every article, recital and annex;
+  search and reading both use it, so they cannot disagree about what exists.
+- **Bookmarks** are `law/kind-number`: `gdpr/article-22` (unchanged), `gdpr/recital-71`,
+  `eu-ai-act/annex-III`. Upper or lower case does not matter.
+- **Search** covers all three kinds; each result says its kind and label ("Recital 71").
+  The new `kind` input searches one kind only.
+- **`read_article` became `read`**, for any bookmark. Refusals say what exists:
+  "gdpr has Recitals 1–173", "gdpr has no annexes", "eu-ai-act has Annexes I, …, XIII".
+- **`list_documents`** — new: each law's short name, official title, pages, and how many
+  articles, recitals and annexes it has.
+- The tool descriptions explain the three kinds: articles are the binding rules, recitals
+  explain and help interpret them, annexes hold lists and details articles refer to.
+
+### What we learned building half 2
+
+- **Recitals crowded out the articles.** In one mixed list, word counting rewarded the
+  recitals' plain sentences, which repeat key words: "prohibited AI practices" returned
+  five recitals and no article; for "very large online platforms systemic risk", Article 34
+  disappeared. Fixed by **grouping**: up to 5 best articles first, then up to 3 recitals,
+  then up to 2 annexes, each ranked only against its own kind. Chosen by Peyman over
+  "articles only unless asked" (which would leave Recital 71 hidden) and the mixed list.
+- **Keyword search does not find AI Act Article 5 for "prohibited AI practices"**, its own
+  title: it is a long article that says "prohibited" once, and the length rule holds it
+  back. A limit of word counting — meaning search (step 5) is the cure.
+- **The model typed `annex-iii`**, was refused, and spent a search finding `annex-III`.
+  Bookmarks are now case-insensitive.
+- **A Python trap, caught by the tests:** on a compiled pattern, `fullmatch(text, 2)` does
+  not mean "ignore case" — the 2 is a start position. It silently read `gdpr` as `pr`.
+
+### Real runs (13 Oct 2026, `openai/gpt-5-mini`)
+
+| Question | What it did | Cost |
+|---|---|---|
+| Does the GDPR give a right to an explanation of automated decisions? | 1 search, read Articles 22 and 15 and **Recital 71**; quoted the recital and labelled it "recital language", separate from the binding articles | $0.0062 |
+| Which AI systems count as high-risk under the AI Act? | 3 searches, read **Article 6** and **Annex III**; listed the eight Annex III areas and Article 6(3)'s exception, every point cited | $0.0079 |
+
+**Claude Code:** the tool is now called `read`, not `read_article`, and there is a new
+`list_documents`. Start a new Claude Code session to see them.
+
+**Status: step 4 complete (13 Oct 2026).** 181 tests, all passing.

@@ -68,3 +68,16 @@ def find_annexes(text: str) -> list[Annex]:
         title, _ = read_title(lines, i + 1, heads[k + 1] if k + 1 < len(heads) else len(lines))
         annexes.append(Annex(ANNEX.fullmatch(lines[i][1]).group(1), title, lines[i][0], end))
     return annexes
+
+
+def official_title(text: str) -> str | None:
+    """The law's title: from the "REGULATION (EU) ..." line up to "(Text with EEA relevance)",
+    joined into one line. None for a document that does not have one."""
+    lines = text.split("\n")[:40]
+    first = next((i for i, line in enumerate(lines) if line.startswith(("REGULATION (EU)", "DIRECTIVE (EU)"))), None)
+    if first is None:
+        return None
+    last = next((i for i in range(first, len(lines)) if lines[i].startswith("(Text with EEA relevance)")), None)
+    if last is None:
+        return None
+    return " ".join(line.strip() for line in lines[first:last])

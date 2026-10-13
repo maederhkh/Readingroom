@@ -30,7 +30,7 @@ class FakeModel:
 
 
 def asks_to_read(bookmark, call_id="read-1"):
-    return Reply(text="", tool_calls=[ToolCall(id=call_id, name="read_article",
+    return Reply(text="", tool_calls=[ToolCall(id=call_id, name="read",
                                                arguments=json.dumps({"bookmark": bookmark}))],
                  cut_off=False, usage=Usage(input_tokens=100, output_tokens=10))
 
@@ -115,7 +115,7 @@ def test_a_requested_article_is_read_and_handed_back_whole(server):
     result = research("q", model, server)
     [tool_message] = tool_messages(model)
     assert json.loads(tool_message["content"])["text"] == "Article 1\nSubject-matter and objectives"
-    assert [s.tool for s in result.steps] == ["read_article"]
+    assert [s.tool for s in result.steps] == ["read"]
 
 
 def test_a_refused_search_is_handed_back_so_the_model_can_correct_itself(server):
@@ -139,7 +139,7 @@ def test_the_tool_call_limit_stops_a_model_that_never_finishes(server):
     model = FakeModel(asks_to_search("objectives"), asks_to_read("tiny-law/article-1"),
                       asks_to_search("objectives"), answers("What I found so far."))
     result = research("q", model, server, max_tool_calls=2)
-    assert [s.tool for s in result.steps] == ["keyword_search", "read_article"]
+    assert [s.tool for s in result.steps] == ["keyword_search", "read"]
     assert result.hit_limit
     assert "Tool-call limit of 2 reached" in tool_messages(model)[-1]["content"]
     last_messages, last_tools = model.requests[-1]

@@ -5,7 +5,8 @@
          +----------------------------------------------------------+
     ... until the model answers instead of asking for another tool call.
 
-The tools: keyword_search (find articles) and read_article (open one in full).
+The tools: keyword_search (find parts of the laws), read (open one in full) and
+list_documents (what is on the shelf).
 
 The tools come from the same MCP helper program Claude Code uses (mcp_server.py),
 called from inside this program - so both chefs see the same tool, the same
@@ -39,7 +40,7 @@ FINAL_ANSWER_NOW = ("You have no tool calls left. Write your final answer now, u
 class Step:
     """One tool call: what the model asked for, and what came back."""
 
-    tool: str                 # "keyword_search" or "read_article"
+    tool: str                 # "keyword_search", "read" or "list_documents"
     arguments: dict
     result: dict | None       # the tool's answer, if it gave one
     error: str | None = None  # why the call was refused, if it was

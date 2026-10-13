@@ -1,6 +1,6 @@
-"""Keyword search over the articles on the shelf.
+"""Keyword search over the articles, recitals and annexes on the shelf.
 
-Each article is scored with BM25, the standard keyword-search formula. It encodes
+Each passage is scored with BM25, the standard keyword-search formula. It encodes
 three common-sense rules:
 
 1. Rare words count more. "accuracy" is in few articles, "data" in nearly all, so
@@ -29,6 +29,8 @@ B = 0.75
 
 WORD = re.compile(r"[a-z0-9]+")
 SNIPPET_BEFORE, SNIPPET_AFTER = 150, 200  # characters shown around the matching words
+# How many recitals and annexes a grouped search adds after the articles.
+GROUPED_RECITALS, GROUPED_ANNEXES = 3, 2
 
 
 def tokenize(text: str) -> list[str]:
@@ -38,30 +40,30 @@ def tokenize(text: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Passage:
-    """One searchable piece of a law. For now, one whole article."""
+    """One searchable piece of a law: a whole article, recital or annex."""
 
     doc_id: str
-    article: int
-    title: str
+    kind: str            # "article", "recital" or "annex"
+    number: int | str    # 5, 71, or "III" for annexes
+    title: str | None    # recitals have none
     page_start: int
     page_end: int
     text: str
 
     @property
     def bookmark(self) -> str:
-        return f"{self.doc_id}/article-{self.article}"
+        return f"{self.doc_id}/{self.kind}-{self.number}"
+
+    @property
+    def label(self) -> str:
+        return f"{shelf.LABEL[self.kind]} {self.number}"
 
 
 def load_passages(shelf_dir: pathlib.Path) -> list[Passage]:
-    """Every article of every law on the shelf, ready to be searched."""
-    passages = []
-    for doc_id in shelf.list_documents(shelf_dir):
-        text = shelf.load(shelf_dir, doc_id).text
-        for a in shelf.load_articles(shelf_dir, doc_id):
-            passages.append(Passage(doc_id=doc_id, article=a["number"], title=a["title"],
-                                    page_start=a["page_start"], page_end=a["page_end"],
-                                    text=text[a["start"]:a["end"]]))
-    return passages
+    """Every article, recital and annex of every law on the shelf, ready to be searched."""
+    return [Passage(doc_id=u["law"], kind=u["kind"], number=u["number"], title=u["title"],
+                    page_start=u["page_start"], page_end=u["page_end"], text=u["text"])
+            for u in shelf.units_by_bookmark(shelf_dir).values()]
 
 
 @dataclass(frozen=True)
@@ -81,7 +83,8 @@ class KeywordIndex:
         # In how many passages each word appears at least once.
         self._passages_with = Counter(word for counts in self._counts for word in counts)
 
-    def search(self, query: str, limit: int = 5, laws: list[str] | None = None) -> list[Hit]:
+    def search(self, query: str, limit: int = 5, laws: list[str] | None = None,
+               kinds: list[str] | None = None) -> list[Hit]:
         words = list(dict.fromkeys(tokenize(query)))  # each query word once, in order
         phrases = [tokenize(p) for p in re.findall(r'"([^"]*)"', query) if tokenize(p)]
         if not words:
@@ -90,13 +93,27 @@ class KeywordIndex:
         for i, passage in enumerate(self.passages):
             if laws and passage.doc_id not in laws:
                 continue
+            if kinds and passage.kind not in kinds:
+                continue
             if not all(self._phrase_at(i, phrase) is not None for phrase in phrases):
                 continue
             score = sum(self._word_score(i, word) for word in words)
             if score > 0:
                 hits.append(Hit(passage, score, self._snippet(i, words, phrases)))
-        hits.sort(key=lambda h: (-h.score, h.passage.doc_id, h.passage.article))
+        hits.sort(key=lambda h: (-h.score, h.passage.doc_id, h.passage.kind, str(h.passage.number)))
         return hits[:limit]
+
+    def search_grouped(self, query: str, limit: int = 5, laws: list[str] | None = None) -> list[Hit]:
+        """The best articles first, then the best recitals, then the best annexes - each
+        ranked only against its own kind.
+
+        Ranking all kinds in one list let recitals push the binding articles out: they
+        repeat the key words in plain sentences, and word counting rewards that. For
+        "prohibited AI practices" one list held five recitals and no articles at all.
+        """
+        return (self.search(query, limit=limit, laws=laws, kinds=["article"])
+                + self.search(query, limit=GROUPED_RECITALS, laws=laws, kinds=["recital"])
+                + self.search(query, limit=GROUPED_ANNEXES, laws=laws, kinds=["annex"]))
 
     def _rarity(self, word: str) -> float:
         """High for words in few passages, near zero for words in almost all."""
