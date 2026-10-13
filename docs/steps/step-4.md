@@ -47,3 +47,49 @@ used a quarter of the tokens of ten searches for fragments.
 article boundaries), and list the documents.
 
 **Status:** 131 tests, all passing.
+
+## 4b — the invisible half gets bookmarks (13 Oct 2026)
+
+**The problem.** Search only knew articles, which are about half of each law. The rest
+was on the shelf but no bookmark pointed to it, so the agent could never find or read it:
+
+| Law | Articles | Recitals | Annexes |
+|---|---|---|---|
+| GDPR | 55% | 45% (173) | — |
+| AI Act | 52% | 40% (180) | 8% (13) |
+| DSA | 52% | 47% (156) | — |
+
+Example: GDPR Recital 71 contains "obtain an explanation of the decision reached" — a
+phrase that appears nowhere in Article 22. Searching for it returned "No articles
+contain these words". The AI Act's high-risk list is Annex III; Article 6 only refers to it.
+
+**Why not a "read around a passage" tool.** It cannot reach text that search never
+lands on, and for articles it is no longer needed — read_article returns the whole one.
+
+**Built in half 1:** recitals and annexes are found and saved as bookmarks
+(`recitals.json`, `annexes.json`), and `inspect` shows them:
+
+```bash
+python -m readingroom inspect gdpr --recital 71
+python -m readingroom inspect eu-ai-act --annex III
+```
+
+Coverage by bookmarks: about 52% → over 99% of each law. The remaining ~0.6% is the
+title, "Having regard to…" lines, chapter headings and signatures.
+
+**Rules learned from the real text**
+
+- Recitals sit between `Whereas:` and `HAVE ADOPTED THIS REGULATION:` (once per law),
+  each starting with `(n)`. A new recital starts only on the *next* number, so a line
+  that merely starts with a citation number cannot start a fake one.
+- Annexes come after the closing sentence; `ANNEX III` alone on a line, title below.
+- **Title rule extended.** Annex VIII and XII titles continue onto a line starting with a
+  capital ("…in accordance with" / "Article 49"), which the small-letter rule missed. A
+  title now also continues after a line ending on a word no title ends with (with, of,
+  their…). Checked: it changes none of the 305 article, chapter and section titles.
+  The bold-printing check was not usable here — Annex X's title is italic, not bold.
+- The "annexes only after the closing sentence" rule is never needed in these three
+  laws, so breaking it changed no real-document test. A dedicated test now guards it.
+
+**Status:** 163 tests, all passing. Half 2: search, `read` and `list_documents` cover
+all three kinds of bookmark.

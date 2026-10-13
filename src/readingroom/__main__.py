@@ -4,6 +4,8 @@
     python -m readingroom inspect gdpr            one document: its details and articles
     python -m readingroom inspect gdpr --page 35
     python -m readingroom inspect gdpr --article 5
+    python -m readingroom inspect gdpr --recital 71
+    python -m readingroom inspect eu-ai-act --annex III
     python -m readingroom search accuracy --law gdpr
     python -m readingroom search "\\"kept up to date\\""
     python -m readingroom ask "What does the GDPR say about automated decision-making?"
@@ -20,6 +22,7 @@ from readingroom.mcp_server import PROJECT, build_server
 from readingroom.model import OpenRouterModel
 from readingroom.pdf import read_clean_text
 from readingroom.search import KeywordIndex, load_passages
+from readingroom.units import find_annexes, find_recitals
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -39,9 +42,13 @@ def ingest(args) -> int:
         sha256 = hashlib.sha256(pdf.read_bytes()).hexdigest()
         shelf.save(shelf_dir, doc_id, doc, source_name=pdf.name, source_sha256=sha256)
         articles = find_articles(doc.text)
+        recitals = find_recitals(doc.text)
+        annexes = find_annexes(doc.text)
         shelf.save_articles(shelf_dir, doc_id, articles, doc)
+        shelf.save_units(shelf_dir, doc_id, "recitals", recitals, doc)
+        shelf.save_units(shelf_dir, doc_id, "annexes", annexes, doc)
         print(f"{doc_id:24} {doc.page_count:4} pages  {len(doc.text):>9,} characters  "
-              f"{len(articles):4} articles  <- {pdf.name}")
+              f"{len(articles):4} articles {len(recitals):4} recitals {len(annexes):3} annexes  <- {pdf.name}")
     return 0
 
 
@@ -56,10 +63,22 @@ def inspect(args) -> int:
         return _show_page(shelf_dir, args.document, args.page)
     if args.article is not None:
         return _show_article(shelf_dir, args.document, args.article)
+    if args.recital is not None:
+        return _show_unit(shelf_dir, args.document, "recitals", args.recital)
+    if args.annex is not None:
+        return _show_unit(shelf_dir, args.document, "annexes", args.annex.upper())
     d = shelf.details(shelf_dir, args.document)
+    articles = shelf.load_articles(shelf_dir, args.document)
+    recitals = shelf.load_units(shelf_dir, args.document, "recitals")
+    annexes = shelf.load_units(shelf_dir, args.document, "annexes")
     print(f"{args.document}: {d['pages']} pages, {d['characters']:,} characters, from {d['source']}")
-    for a in shelf.load_articles(shelf_dir, args.document):
+    print(f"  {len(articles)} articles, {len(recitals)} recitals, {len(annexes)} annexes")
+    if recitals:
+        print(f"  Recitals 1–{len(recitals)}  {_pages({'page_start': recitals[0]['page_start'], 'page_end': recitals[-1]['page_end']}):>10}")
+    for a in articles:
         print(f"  Article {a['number']:<4} {_pages(a):>10}   {a['title']}")
+    for a in annexes:
+        print(f"  Annex {a['number']:<6} {_pages(a):>10}   {a['title']}")
     return 0
 
 
@@ -154,6 +173,20 @@ def _show_article(shelf_dir: pathlib.Path, doc_id: str, number: int) -> int:
     return 0
 
 
+def _show_unit(shelf_dir: pathlib.Path, doc_id: str, kind: str, number) -> int:
+    """Show one recital or annex, with its bookmark on top."""
+    name = "Recital" if kind == "recitals" else "Annex"
+    found = [u for u in shelf.load_units(shelf_dir, doc_id, kind) if u["number"] == number]
+    if not found:
+        print(f"{doc_id} has no {name} {number}", file=sys.stderr)
+        return 1
+    u = found[0]
+    label = f"{name} {number}" + (f" — {u['title']}" if "title" in u else "")
+    print(f"[{doc_id} · {label} · {_pages(u)} · characters {u['start']:,}–{u['end']:,}]\n")
+    print(shelf.load(shelf_dir, doc_id).text[u["start"]:u["end"]])
+    return 0
+
+
 def _pages(article: dict) -> str:
     if article["page_start"] == article["page_end"]:
         return f"p. {article['page_start']}"
@@ -174,6 +207,8 @@ def _parser() -> argparse.ArgumentParser:
     shown = p.add_mutually_exclusive_group()
     shown.add_argument("--page", type=int, help="show this page's clean text")
     shown.add_argument("--article", type=int, help="show this article's text")
+    shown.add_argument("--recital", type=int, help="show this recital's text")
+    shown.add_argument("--annex", help="show this annex's text, e.g. III")
     p.add_argument("--shelf", default="shelf")
     p.set_defaults(command=inspect)
 

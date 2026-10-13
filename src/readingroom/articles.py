@@ -3,7 +3,8 @@
 Rules, each learned by reading the clean GDPR, AI Act and DSA:
 
 1. An article heading is a line holding only "Article N". Its title is the next line.
-2. A title continues onto following lines that start with a small letter
+2. A title continues onto following lines that start with a small letter, or after a
+   line ending mid-phrase - see read_title()
    ("...the rights of the data" / "subject"). Checked against the PDFs' bold printing:
    the two agree on every one of the 306 headings. Chapter and section titles follow the
    same rule.
@@ -25,6 +26,8 @@ ARTICLE = re.compile(r"Article (\d+)\s*")
 CHAPTER = re.compile(r"CHAPTER [IVXLC]+\s*")
 SECTION = re.compile(r"(?:SECTION|Section) \d+\s*")
 CLOSING = "This Regulation shall be binding in its entirety"
+# A title line ending on one of these words has not finished.
+UNFINISHED = re.compile(r"\b(?:with|of|the|their|its|for|to|and|or|in|on|by|a|an|from|under|between)\s*$")
 
 
 @dataclass(frozen=True)
@@ -38,7 +41,7 @@ class Article:
 
 
 def find_articles(text: str) -> list[Article]:
-    lines = _lines_with_positions(text)
+    lines = lines_with_positions(text)
     first = next((i for i, (_, line) in enumerate(lines) if line.strip() == "Article 1"), None)
     if first is None:
         return []
@@ -60,7 +63,7 @@ def find_articles(text: str) -> list[Article]:
         if CHAPTER.fullmatch(line) or SECTION.fullmatch(line) or is_article:
             close(position - 1)  # - 1: the newline before a heading is not the article's
             open_article = None
-            title, i = _title(lines, i + 1, closing)
+            title, i = read_title(lines, i + 1, closing)
             label = f"{line.strip()} — {title}"
             if CHAPTER.fullmatch(line):
                 chapter, section = label, None
@@ -75,17 +78,23 @@ def find_articles(text: str) -> list[Article]:
     return articles
 
 
-def _title(lines: list[tuple[int, str]], i: int, stop: int) -> tuple[str, int]:
-    """The title starting at line i, and the index of the line after it."""
+def read_title(lines: list[tuple[int, str]], i: int, stop: int) -> tuple[str, int]:
+    """The title starting at line i, and the index of the line after it.
+
+    A title continues onto the next line if that line starts with a small letter, or if
+    the title so far ends on a word no title ends with ("...in accordance with" /
+    "Article 49"). The second rule was added for AI Act Annexes VIII and XII; it changes
+    none of the 305 article, chapter and section titles.
+    """
     parts = [lines[i][1].strip()]
     i += 1
-    while i < stop and re.match(r"[a-z]", lines[i][1]):
+    while i < stop and (re.match(r"[a-z]", lines[i][1]) or UNFINISHED.search(parts[-1])):
         parts.append(lines[i][1].strip())
         i += 1
     return " ".join(parts), i
 
 
-def _lines_with_positions(text: str) -> list[tuple[int, str]]:
+def lines_with_positions(text: str) -> list[tuple[int, str]]:
     """Every line of the text, with the position where it begins."""
     result, position = [], 0
     for line in text.split("\n"):

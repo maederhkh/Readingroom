@@ -55,3 +55,21 @@ def test_details_record_where_the_text_came_from(tmp_path):
     assert details["source_sha256"] == "abc123"
     assert details["pages"] == 2
     assert details["characters"] == len("one\ntwo")
+
+
+def test_recitals_and_annexes_are_saved_with_their_pages(tmp_path):
+    from readingroom.units import Annex, Recital
+    doc = CleanText.from_pages(["(1) First recital", "ANNEX I\nList\n1. Thing"])
+    shelf.save_units(tmp_path, "law", "recitals", [Recital(number=1, start=0, end=17)], doc)
+    shelf.save_units(tmp_path, "law", "annexes", [Annex(number="I", title="List", start=18, end=len(doc.text))], doc)
+    assert shelf.load_units(tmp_path, "law", "recitals") == [
+        {"number": 1, "start": 0, "end": 17, "page_start": 1, "page_end": 1}]
+    assert shelf.load_units(tmp_path, "law", "annexes") == [
+        {"number": "I", "title": "List", "start": 18, "end": len(doc.text), "page_start": 2, "page_end": 2}]
+
+
+def test_a_document_saved_before_recitals_existed_has_none(tmp_path):
+    # Shelves built before this step have no recitals.json; reading must not crash.
+    doc = CleanText.from_pages(["x"])
+    shelf.save(tmp_path, "old", doc, source_name="old.pdf", source_sha256="a")
+    assert shelf.load_units(tmp_path, "old", "recitals") == []

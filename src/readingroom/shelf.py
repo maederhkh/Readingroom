@@ -53,6 +53,25 @@ def save_articles(shelf: pathlib.Path, doc_id: str, articles: list[Article], doc
     (shelf / doc_id / "articles.json").write_text(text, encoding="utf-8")
 
 
+def save_units(shelf: pathlib.Path, doc_id: str, kind: str, units: list, doc: CleanText) -> None:
+    """Save recitals or annexes as bookmarks: shelf/<doc>/recitals.json or annexes.json."""
+    records = []
+    for unit in units:
+        record = asdict(unit)
+        record["page_start"] = doc.page_at(unit.start)
+        record["page_end"] = doc.page_at(unit.end - 1)
+        records.append(record)
+    (shelf / doc_id).mkdir(parents=True, exist_ok=True)
+    text = json.dumps(records, indent=2, ensure_ascii=False)
+    (shelf / doc_id / f"{kind}.json").write_text(text, encoding="utf-8")
+
+
+def load_units(shelf: pathlib.Path, doc_id: str, kind: str) -> list[dict]:
+    """Recitals or annexes; empty for a law that has none, or a shelf built before they existed."""
+    path = shelf / doc_id / f"{kind}.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+
 def load_articles(shelf: pathlib.Path, doc_id: str) -> list[dict]:
     return json.loads((shelf / doc_id / "articles.json").read_text(encoding="utf-8"))
 

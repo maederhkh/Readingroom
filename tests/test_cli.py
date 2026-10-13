@@ -147,3 +147,47 @@ def test_inspect_an_unknown_document_says_what_is_on_the_shelf(documents, tmp_pa
     capsys.readouterr()
     assert main(["inspect", "gdpr", "--shelf", str(shelf)]) == 1
     assert "tiny-law" in capsys.readouterr().err
+
+
+def test_ingest_reports_recitals_and_annexes(full_documents, tmp_path, capsys):
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(tmp_path / "shelf")])
+    out = capsys.readouterr().out
+    assert "1 articles" in out and "2 recitals" in out and "1 annexes" in out
+
+
+def test_inspect_summary_counts_every_kind_of_part(full_documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    main(["inspect", "full-law", "--shelf", str(shelf)])
+    out = capsys.readouterr().out
+    assert "1 articles, 2 recitals, 1 annexes" in out
+    assert "Annex I" in out and "List of things" in out
+
+
+def test_inspect_shows_one_recital(full_documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    assert main(["inspect", "full-law", "--recital", "2", "--shelf", str(shelf)]) == 0
+    out = capsys.readouterr().out
+    assert "[full-law · Recital 2 · p. 1" in out
+    assert "(2) The second recital explains how." in out
+
+
+def test_inspect_shows_one_annex(full_documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    assert main(["inspect", "full-law", "--annex", "I", "--shelf", str(shelf)]) == 0
+    out = capsys.readouterr().out
+    assert "[full-law · Annex I — List of things · p. 1" in out
+    assert "1. The first thing." in out
+
+
+def test_inspect_a_recital_that_does_not_exist(full_documents, tmp_path, capsys):
+    shelf = tmp_path / "shelf"
+    main(["ingest", "--documents", str(full_documents), "--shelf", str(shelf)])
+    capsys.readouterr()
+    assert main(["inspect", "full-law", "--recital", "9", "--shelf", str(shelf)]) == 1
+    assert "full-law has no Recital 9" in capsys.readouterr().err

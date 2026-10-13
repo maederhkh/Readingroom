@@ -16,3 +16,28 @@ def documents(tmp_path):
     pdf.save(folder / "Tiny Law.pdf")
     pdf.close()
     return folder
+
+
+@pytest.fixture
+def full_documents(tmp_path):
+    """A one-page law with every part: two recitals, one article, the closing sentence, one annex."""
+    folder = tmp_path / "full_documents"
+    folder.mkdir()
+    pdf = pymupdf.open()
+    page = pdf.new_page(width=595, height=842)
+    lines = ["Whereas:",
+             "(1) The first recital explains why.",
+             "(2) The second recital explains how.",
+             "HAVE ADOPTED THIS REGULATION:",
+             "Article 1",
+             "Subject-matter",
+             "This Regulation shall be binding in its entirety and directly applicable in all Member States.",
+             "Done at Brussels.",
+             "ANNEX I",
+             "List of things",
+             "1. The first thing."]
+    for k, line in enumerate(lines):
+        page.insert_text((70, 120 + 15 * k), line, fontsize=9.6)
+    pdf.save(folder / "Full Law.pdf")
+    pdf.close()
+    return folder
